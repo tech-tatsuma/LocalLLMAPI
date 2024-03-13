@@ -34,8 +34,6 @@ app.add_middleware(
     expose_headers=["*"],
 )
 
-#===============================================================================
-# TinyLlama
 # 1.HuggingFaceからモデルをダウンロード
 model_id = "TinyLlama/TinyLlama-1.1B-Chat-v1.0"
 download_path = snapshot_download(repo_id=model_id)
@@ -49,7 +47,9 @@ model = AutoModelForCausalLM.from_pretrained(download_path)
 pipe = pipeline("text-generation", model=model, tokenizer=tokenizer, max_new_tokens=256)
 llm = HuggingFacePipeline(pipeline=pipe)
 
-# 4.ChatPromptTemplateを作成
+#===============================================================================
+# シンプルなチャットボット
+# ChatPromptTemplateを作成
 prompt = ChatPromptTemplate.from_template(
     "<|system|>You are a intelligent chatbot. </s><|user|>{question}</s><|assistant|>"
 )
@@ -59,38 +59,68 @@ chain = (
         prompt | llm 
 )
 
+# ルートを追加
 add_routes(
     app,
     chain,
-    path="/tinyllama",
+    path="/tinyllama/simplechat",
 )
 
+#===============================================================================
+# PDFファイルを読み込むRAGの機能を持つチャットボット
+from langchain.document_loaders import PDFMinerLoader
+from langchain.text_splitter import RecursiveCharacterTextSplitter
+from langchain.embeddings import HuggingFaceEmbeddings
+from langchain.vectorstores import Chroma
+from langchain.chains import RetrievalQA
+
+embeddings = HuggingFaceEmbeddings(model_name="intfloat/multilingual-e5-base")
+
+@chain
+def pdf_rag(input: Dict[str, Any]) -> Dict[str, Any]:
+    print("pdf_rag input", input, flush=True)
+    # PDFファイルの読み込み
+    loader = PDFMinerLoader(input["pdf"])
+    documents = loader.load()
+
+    # 文書を分割
+    text_splitter = RecursiveCharacterTextSplitter(chunk_size=400, chunk_overlap=0)
+    texts = text_splitter.split_documents(documents)
+
+    # embeddingsを計算
+    db = Chroma.from_documents(texts, embeddings, persist_directory="./storage")
+    db.persist()
+
+    retreiver = db.as_retreiver()
+
+    # Chainの作成
+    qa = RetrievalQA.from_chain_type(llm=llm, chain_type="stuff", retriever=retriever)
+
+    # Chainの実行
+    return {"response": qa.run(input["question"])}
+
+# 入力の型を定義
+class PDFRAGInput(BaseModel):
+    pdf: str = Field(..., title="PDFファイルのURL")
+    question: str = Field(..., title="質問")
+
+# 出力の型を定義
+class PDFRAGOutput(BaseModel):
+    response: str = Field(..., title="回答")
+
+# チェーンの作成
+pdfragchain_ = (
+    pdf_rag.with_types(
+        input_type=PDFRAGInput,
+        output_type=PDFRAGOutput
+    )
+)
+
+# ルートを追加
+add_routes(app, pdfragchain_, path="/tinyllama/pdfrag")
 
 #===============================================================================
-# codellama
-# device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-# model_id2 = "elyza/ELYZA-japanese-Llama-2-7b-instruct"
-# download_path2 = snapshot_download(repo_id=model_id2)
-
-# tokenizer2 = AutoTokenizer.from_pretrained(download_path2)
-# model2 = AutoModelForCausalLM.from_pretrained(download_path2).to(device)
-
-# pipe2 = pipeline("text-generation", model=model2, tokenizer=tokenizer2, framework='pt', max_new_tokens=1024)
-# llm2 = HuggingFacePipeline(pipeline=pipe2)
-
-# prompt2 = ChatPromptTemplate.from_template(
-#     "<|system|>あなたは日本語対応を行うチャットボットです．</s><|user|>{question}</s><|assistant|>"
-# )
-
-# chain2 = (
-#         prompt2 | llm2 
-# )   
-
-# add_routes(
-#     app,
-#     chain2,
-#     path="/elyza",
-# )
+# agent機能を持つチャットボット（python + llm-math + web）
 
 if __name__ == "__main__":
     import uvicorn
