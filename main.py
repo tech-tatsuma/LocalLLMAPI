@@ -8,7 +8,12 @@ from langchain.prompts import ChatPromptTemplate
 from huggingface_hub import snapshot_download
 
 import torch
-from pydantic import BaseModel, Field
+from pydantic import BaseModel
+try:
+    from pydantic.v1 import Field
+except ImportError:
+    from pydantic import Field
+
 from dotenv import load_dotenv
 from langchain_core.runnables import chain
 from typing import Dict, Any, Optional, List, Union
@@ -55,58 +60,59 @@ prompt = ChatPromptTemplate.from_template(
 )
 
 # Chainを設定
-chain = (
+simplechat_chain = (
         prompt | llm 
 )
 
 # ルートを追加
 add_routes(
     app,
-    chain,
+    simplechat_chain,
     path="/tinyllama/simplechat",
 )
 
 #===============================================================================
 # PDFファイルを読み込むRAGの機能を持つチャットボット
-from langchain.document_loaders import PDFMinerLoader
+from langchain_community.document_loaders import PyPDFLoader
 from langchain.text_splitter import RecursiveCharacterTextSplitter
-from langchain.embeddings import HuggingFaceEmbeddings
-from langchain.vectorstores import Chroma
+from langchain_community.embeddings import HuggingFaceEmbeddings
+from langchain_community.vectorstores import FAISS
 from langchain.chains import RetrievalQA
 
 embeddings = HuggingFaceEmbeddings(model_name="intfloat/multilingual-e5-base")
 
 @chain
 def pdf_rag(input: Dict[str, Any]) -> Dict[str, Any]:
-    print("pdf_rag input", input, flush=True)
     # PDFファイルの読み込み
-    loader = PDFMinerLoader(input["pdf"])
+    loader = PyPDFLoader(input["pdf"])
     documents = loader.load()
 
     # 文書を分割
-    text_splitter = RecursiveCharacterTextSplitter(chunk_size=400, chunk_overlap=0)
+    text_splitter = RecursiveCharacterTextSplitter(chunk_size=512, chunk_overlap=40)
     texts = text_splitter.split_documents(documents)
 
     # embeddingsを計算
-    db = Chroma.from_documents(texts, embeddings, persist_directory="./storage")
-    db.persist()
+    vectorstore = FAISS.from_documents(
+        documents=texts, embedding=embeddings
+    )
 
-    retreiver = db.as_retreiver()
+    retreiver = vectorstore.as_retriever()
 
     # Chainの作成
-    qa = RetrievalQA.from_chain_type(llm=llm, chain_type="stuff", retriever=retriever)
+    qa = RetrievalQA.from_chain_type(llm=llm, chain_type="stuff", retriever=retreiver)
 
     # Chainの実行
     return {"response": qa.run(input["question"])}
 
+
 # 入力の型を定義
 class PDFRAGInput(BaseModel):
-    pdf: str = Field(..., title="PDFファイルのURL")
-    question: str = Field(..., title="質問")
+    pdf: str = Field(..., description="PDFURL")
+    question: str = Field(..., description="question")
 
 # 出力の型を定義
 class PDFRAGOutput(BaseModel):
-    response: str = Field(..., title="回答")
+    response: str = Field(..., description="response")
 
 # チェーンの作成
 pdfragchain_ = (
@@ -116,8 +122,15 @@ pdfragchain_ = (
     )
 )
 
+input_data = {
+    "pdf": "https://www.cs.toronto.edu/~hinton/absps/NatureDeepReview.pdf",
+    "question": "What is the main point of the paper?"
+}
+
+print(pdfragchain_.invoke(input_data))
+
 # ルートを追加
-add_routes(app, pdfragchain_, path="/tinyllama/pdfrag")
+# add_routes(app, pdfragchain_, path="/tinyllama/pdfrag")
 
 #===============================================================================
 # agent機能を持つチャットボット（python + llm-math + web）
