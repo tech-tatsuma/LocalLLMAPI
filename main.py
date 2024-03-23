@@ -64,6 +64,7 @@ simplechat_chain = (
         prompt | llm 
 )
 
+
 # ルートを追加
 add_routes(
     app,
@@ -127,10 +128,11 @@ input_data = {
     "question": "What is the main point of the paper?"
 }
 
-print(pdfragchain_.invoke(input_data))
+print(pdfragchain_.run(input_data))
 
-# ルートを追加
-# add_routes(app, pdfragchain_, path="/tinyllama/pdfrag")
+@app.post("/tinyllama/pdfrag", response_model=PDFRAGOutput)
+async def pdfrag_endpoint(input: PDFRAGInput):
+    return pdfragchain_.run(input.dict())
 
 #===============================================================================
 # agent機能を持つチャットボット（python + llm-math + web）
