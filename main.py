@@ -81,10 +81,19 @@ from langchain.chains import RetrievalQA
 
 embeddings = HuggingFaceEmbeddings(model_name="intfloat/multilingual-e5-base")
 
+# 入力の型を定義
+class PDFRAGInput(BaseModel):
+    pdf: str = Field(..., description="PDFURL")
+    question: str = Field(..., description="question")
+
+# 出力の型を定義
+class PDFRAGOutput(BaseModel):
+    response: str = Field(..., description="response")
+
 @chain
-def pdf_rag(input: Dict[str, Any]) -> Dict[str, Any]:
+def pdf_rag(input: PDFRAGInput) -> Dict[str, Any]:
     # PDFファイルの読み込み
-    loader = PyPDFLoader(input["pdf"])
+    loader = PyPDFLoader(input.pdf)
     documents = loader.load()
 
     # 文書を分割
@@ -102,17 +111,7 @@ def pdf_rag(input: Dict[str, Any]) -> Dict[str, Any]:
     qa = RetrievalQA.from_chain_type(llm=llm, chain_type="stuff", retriever=retreiver)
 
     # Chainの実行
-    return {"response": qa.run(input["question"])}
-
-
-# 入力の型を定義
-class PDFRAGInput(BaseModel):
-    pdf: str = Field(..., description="PDFURL")
-    question: str = Field(..., description="question")
-
-# 出力の型を定義
-class PDFRAGOutput(BaseModel):
-    response: str = Field(..., description="response")
+    return {"response": qa.run(input.question)}
 
 # チェーンの作成
 pdfragchain_ = (
@@ -122,15 +121,9 @@ pdfragchain_ = (
     )
 )
 
-input_data = {
-    "pdf": "https://www.cs.toronto.edu/~hinton/absps/NatureDeepReview.pdf",
-    "question": "What is the main point of the paper?"
-}
-
-print(pdfragchain_.invoke(input_data))
-
-# ルートを追加
-# add_routes(app, pdfragchain_, path="/tinyllama/pdfrag")
+@app.post("/tinyllama/pdfrag", response_model=PDFRAGOutput)
+async def run_pdf_rag(input: PDFRAGInput) -> PDFRAGOutput:
+    return pdfragchain_.run(input)
 
 #===============================================================================
 # agent機能を持つチャットボット（python + llm-math + web）
