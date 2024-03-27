@@ -64,6 +64,7 @@ simplechat_chain = (
         prompt | llm 
 )
 
+
 # ルートを追加
 add_routes(
     app,
