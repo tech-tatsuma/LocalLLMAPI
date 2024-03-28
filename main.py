@@ -8,19 +8,19 @@ from langchain.prompts import ChatPromptTemplate
 from huggingface_hub import snapshot_download
 
 import torch
-from pydantic import BaseModel
-try:
-    from pydantic.v1 import Field
-except ImportError:
-    from pydantic import Field
+from typing import Any, Dict, TypedDict
 
 from dotenv import load_dotenv
 from langchain_core.runnables import chain
 from typing import Dict, Any, Optional, List, Union
 from langchain_core.runnables import RunnableConfig
 
+from googletrans import LANGUAGES, Translator
+
 # huggingfaceのAPI KEYのため読み込む
 load_dotenv()
+
+translator = Translator()
 
 # Appを設定
 app = FastAPI(
@@ -83,18 +83,19 @@ from langchain.chains import RetrievalQA
 embeddings = HuggingFaceEmbeddings(model_name="intfloat/multilingual-e5-base")
 
 # 入力の型を定義
-class PDFRAGInput(BaseModel):
-    pdf: str = Field(..., description="PDFURL")
-    question: str = Field(..., description="question")
+class PDFRAGInput(TypedDict):
+    pdf: str
+    question: str
 
 # 出力の型を定義
-class PDFRAGOutput(BaseModel):
-    response: str = Field(..., description="response")
+# 出力の型を定義
+class PDFRAGOutput(TypedDict):
+    output: str
 
 @chain
 def pdf_rag(input: PDFRAGInput) -> Dict[str, Any]:
     # PDFファイルの読み込み
-    loader = PyPDFLoader(input.pdf)
+    loader = PyPDFLoader(input["pdf"])
     documents = loader.load()
 
     # 文書を分割
@@ -112,7 +113,7 @@ def pdf_rag(input: PDFRAGInput) -> Dict[str, Any]:
     qa = RetrievalQA.from_chain_type(llm=llm, chain_type="stuff", retriever=retreiver)
 
     # Chainの実行
-    return {"response": qa.run(input.question)}
+    return {"response": qa.invoke(input["question"])}
 
 # チェーンの作成
 pdfragchain_ = (
@@ -122,9 +123,7 @@ pdfragchain_ = (
     )
 )
 
-@app.post("/tinyllama/pdfrag", response_model=PDFRAGOutput)
-async def run_pdf_rag(input: PDFRAGInput) -> PDFRAGOutput:
-    return pdfragchain_.run(input)
+add_routes(app, pdfragchain_, path="/tinyllama/pdfrag")
 
 #===============================================================================
 # agent機能を持つチャットボット（python + llm-math + web）
